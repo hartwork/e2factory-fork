@@ -1,0 +1,98 @@
+# Copyright (C) 2025 Sebastian Pipping <sebastian@pipping.org>
+#
+# This file is part of e2factory, the emlix embedded build system.
+# For more information see http://www.e2factory.org
+#
+# e2factory is a registered trademark of emlix GmbH.
+#
+# e2factory is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+# more details.
+
+name: Build Demo BSP
+
+on:
+  pull_request:
+  push:
+  schedule:
+    - cron: '0 2 * * 0'  # Every Monday at 2am
+  workflow_dispatch:
+
+# This reduces permissions to the bare minimum for security
+permissions:
+  contents: read
+
+jobs:
+  build_demo_bsp:
+    name: Build Demo BSP
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+    - name: Install build and runtime dependencies
+      run: |-
+        set -x
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends -V \
+            build-essential \
+            ca-certificates \
+            curl \
+            git \
+            make \
+            rsync \
+            ssh \
+            unzip \
+            wget
+
+    - name: Install e2factory
+      run: |-
+        set -x
+        make all -j$(nproc)
+        sudo groupadd ebs
+        sudo make install
+
+    - name: Download and extract Demo BSP
+      run: |-
+        image=e2factory_demo_v2023.01.1.tar.gz
+        set -x
+        wget -q "https://emlix.com/fileadmin/emlix/download/${image}.sha1"
+        wget -q "https://emlix.com/fileadmin/emlix/download/${image}"
+        sha1sum --check "${image}.sha1"
+        sudo tar xf "${image}" -C /var/lib/e2factory
+        rm -v "${image}"
+
+    - name: Build Demo BSP (takes about 60 minutes)
+      run: |-
+        set -x
+        sudo -s <<<"
+            set -x -o pipefail
+
+            cd
+            e2-fetch-project bsp/demo
+
+            cd demo/
+            e2-build target-image
+
+            chmod -R a+r /root/ /var/tmp/e2cache-root/results/bsp/demo/
+            find /root/ /var/tmp/e2cache-root/results/bsp/demo/ -type d -exec chmod a+x {} +
+        "
+
+    - name: Store build logs
+      uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1  # v4.6.1
+      with:
+        name: demo_bsp_${{ github.sha }}_logs
+        path: /root/demo/log/
+        if-no-files-found: error
+
+    - name: Store build output
+      uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1  # v4.6.1
+      with:
+        name: demo_bsp_${{ github.sha }}_output
+        path: /root/demo/out/
+        if-no-files-found: error
